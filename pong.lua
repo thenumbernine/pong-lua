@@ -1,3 +1,4 @@
+#!/usr/bin/env luajit
 --[[
 TODO gui for local and remote games ...
 
@@ -6,12 +7,14 @@ remote connections may or may not be players
 --]]
 
 local ffi = require 'ffi'
-local sdl = require 'ffi.sdl'
+local sdl = require 'sdl'
 local class = require 'ext.class'
+local table = require 'ext.table'
 local vec2 = require 'vec.vec2'
-local openglapp = require 'openglapp'
-require 'netrefl.netfield'
-require 'netrefl.netfield_vec'
+local matrix_ffi = require 'matrix.ffi'
+local netFieldNumber = require 'netrefl.netfield'.netFieldNumber
+local netFieldVec2 = require 'netrefl.netfield_vec'.netFieldVec2 
+local createNetFieldList = require 'netrefl.netfield_list'.createNetFieldList
 local NetCom = require 'netrefl.netcom'
 local Server = require 'netrefl.server'
 local Audio = require 'audio.audio'
@@ -65,7 +68,7 @@ do
 			filename=filename,
 			minFilter=gl.GL_LINEAR,
 			magFilter=gl.GL_LINEAR,
-		}
+		}:unbind()
 	end
 
 	function GLRenderer:ortho(a,b,c,d,e,f)
@@ -102,7 +105,7 @@ do
 	local GLES2Renderer = class(Renderer)
 	Renderer.requireClasses.OpenGLES2 = GLES2Renderer
 	
-	local GLMatrix4x4, GLProgram
+	local GLProgram
 	local shader
 	local rmat, smat, rsmat, tmat, mvmat, projmat, mvprojmat
 	local color = ffi.new('float[4]')
@@ -111,31 +114,33 @@ do
 	function GLES2Renderer:init(gl_)
 		GLES2Renderer.super.init(self, gl_)
 		gl = gl_
-		GLMatrix4x4 = require 'gles2.matrix4'
-		GLProgram = require 'gles2.program'
-		GLTex2D = require 'gles2.tex2d'
+		GLProgram = require 'gl.program'
+		GLTex2D = require 'gl.tex2d'
 		shader = GLProgram{
+			version = 'latest',
+			precision = 'best',
 			vertexCode=[[
+in vec4 pos;
+out vec2 tc;
 uniform mat4 mat;
-attribute vec4 pos;
-varying vec2 tc;
 void main() {
 	tc = pos.xy + vec2(.5,.5);
 	gl_Position = mat * pos;
 } 
 ]],
 			fragmentCode=[[
-precision mediump float;
+in vec2 tc;
+out vec4 fragColor;
 uniform vec4 color;
 uniform sampler2D tex;
-varying vec2 tc;
 void main() {
-	gl_FragColor = color * texture2D(tex, tc); 
+	fragColor = color * texture(tex, tc); 
 } 
 ]],
-			attributes={'pos'},
-			uniforms={'mat','color','tex'},
 		}
+		local GLMatrix4x4 = function()
+			return matrix_ffi({4,4}, 'float'):zeros():setIdent()
+		end
 		rmat = GLMatrix4x4()
 		smat = GLMatrix4x4()
 		rsmat = GLMatrix4x4()
@@ -150,34 +155,34 @@ void main() {
 			filename=filename,
 			minFilter=gl.GL_LINEAR,
 			magFilter=gl.GL_LINEAR,
-		}
+		}:unbind()
 	end
 
 	function GLES2Renderer:ortho(a,b,c,d,e,f)
-		projmat:ortho(a,b,c,d,e,f)
+		projmat:setOrtho(a,b,c,d,e,f)
 	end
 	
 	function GLES2Renderer:preRender() end
 	
 	function GLES2Renderer:drawBlock(x,y,w,h,th,r,g,b)
-		rmat:rotate(th,0,0,1)
-		smat:scale(w,h,1)
-		rsmat:mult(rmat,smat)
-		tmat:translate(x,y,0)
-		mvmat:mult(tmat,rsmat)
-		mvprojmat:mult(projmat, mvmat)
+		rmat:setRotate(th,0,0,1)
+		smat:setScale(w,h,1)
+		rsmat:mul4x4(rmat,smat)
+		tmat:setTranslate(x,y,0)
+		mvmat:mul4x4(tmat,rsmat)
+		mvprojmat:mul4x4(projmat, mvmat)
 		color[0] = r
 		color[1] = g
 		color[2] = b
 		color[3] = 1
 		gl.glUseProgram(shader.id)
-		gl.glVertexAttribPointer(shader.attributes.pos, 3, gl.GL_FLOAT, false, 12, blockVtxs)
-		gl.glEnableVertexAttribArray(shader.attributes.pos)
-		gl.glUniform1i(shader.uniforms.tex, 0);
-		gl.glUniform4fv(shader.uniforms.color, 1, color)
-		gl.glUniformMatrix4fv(shader.uniforms.mat, 1, false, mvprojmat.v)
+		gl.glVertexAttribPointer(shader.attrs.pos.loc, 3, gl.GL_FLOAT, false, 12, blockVtxs)
+		gl.glEnableVertexAttribArray(shader.attrs.pos.loc)
+		gl.glUniform1i(shader.uniforms.tex.loc, 0);
+		gl.glUniform4fv(shader.uniforms.color.loc, 1, color)
+		gl.glUniformMatrix4fv(shader.uniforms.mat.loc, 1, false, mvprojmat.ptr)
  		gl.glDrawElements(gl.GL_TRIANGLE_STRIP,4,gl.GL_UNSIGNED_SHORT,blockTriStrip)
-        gl.glDisableVertexAttribArray(shader.attributes.pos)
+        gl.glDisableVertexAttribArray(shader.attrs.pos.loc)
 		gl.glUseProgram(0)
 	end
 end
@@ -362,8 +367,8 @@ Game.__netfields = {
 	playerA = netFieldPlayer,
 	playerB = netFieldPlayer,
 	ball = netFieldBall,
-	blocks = netFieldList(netFieldBlock),
-	items = netFieldList(netFieldItem),
+	blocks = createNetFieldList(netFieldBlock),
+	items = createNetFieldList(netFieldItem),
 }
 Game.blockGridSize = 25
 Game.spawnBlockDuration = 1
@@ -653,31 +658,15 @@ if useJoystick then
 	sdlInitFlags = bit.bor(sdlInitFlags, sdl.SDL_INIT_JOYSTICK)
 end
 
--- gl has to be required before openglapp()
--- but R has to be built after
-local gl, rendererClass
-for glname,rendererClassOption in pairs(Renderer.requireClasses) do
-	local requireName = 'ffi.'..glname
-	local res
-	res, gl = pcall(require, requireName)
-	if res then
-		rendererClass = rendererClassOption
-		break
-	end
-end
-if not rendererClass then
-	error("couldn't find renderer api")
-end
-if not gl then
-	error("couldn't find GL api")
-end
+local rendererClass = Renderer.requireClasses.OpenGLES2
+local gl = require 'gl'
 
 local R -- renderer singleton
-openglapp:run{
-	sdlInitFlags=sdlInitFlags,
+local GLApp = require 'glapp'
+local App = GLApp:subclass{
+	sdlInitFlags = sdlInitFlags,
 	title = "Super Pong",
-	gl = gl,
-	init = function()
+	initGL = function(self)
 		R = rendererClass(gl)
 		gl.glClearColor(0,0,1,1)
 		if useTextures then
@@ -753,7 +742,7 @@ openglapp:run{
 		if clientConn.player then
 			if useMouse then
 				sdl.SDL_GetMouseState(x,y)
-				local wx, wy = openglapp:size()
+				local wx, wy = self:size()
 				local px = x[0] / wx * worldSize
 				local py = y[0] / wy * worldSize
 				--clientConn.player.y = worldSize * y[0] / wy
@@ -789,17 +778,22 @@ openglapp:run{
 		game:update(deltaTime)
 		netcom:update()
 	end,
-	event = function(event)
-		if event.type == sdl.SDL_VIDEORESIZE then
-			R:onResize(event.resize.w, event.resize.h)
-		elseif event.type == sdl.SDL_KEYDOWN then
-			if event.key.keysym.sym == sdl.SDLK_ESCAPE then
-				openglapp:done()
+	event = function(self, event)
+		--[[
+		if event[0].type == sdl.SDL_VIDEORESIZE then
+			R:onResize(event[0].resize.w, event[0].resize.h)
+		else
+		--]]
+		if event[0].type == sdl.SDL_KEYDOWN then
+			if event[0].key.keysym.sym == sdl.SDLK_ESCAPE then
+				self:requestExit()
 			end
-		elseif event.type == sdl.SDL_MOUSEMOTION then
+		elseif event[0].type == sdl.SDL_MOUSEMOTION then
 			if useMouse ~= false then	-- only set to true if it has not yet been defined (cleared by keys/joystick)
 				useMouse = true
 			end
 		end
 	end,
 }
+
+return App():run()
