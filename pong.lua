@@ -42,6 +42,7 @@ function Renderer:onResize(wx,wy)
 	end
 end
 
+local font
 do
 	local GLES2Renderer = class(Renderer)
 	Renderer.requireClasses.OpenGLES2 = GLES2Renderer
@@ -54,12 +55,31 @@ do
 		GLES2Renderer.super.init(self)
 		GLTex2D = require 'gl.tex2d'
 
-		view = require 'glapp.view'()
-		sceneObj = require 'gl.sceneobject'{
+		local View = require 'glapp.view'
+		view = View()
+		
+		local Image = require 'image'
+		local fontImage = Image'font.png'
+		
+		local Font = require 'gui.font'
+		font = Font{
+			image = fontImage,
+			tex = GLTex2D{
+				image = fontImage,
+				minFilter = gl.GL_LINEAR_MIPMAP_LINEAR,
+				magFilter = gl.GL_LINEAR,
+				generateMipmap = true,
+			}:unbind(),
+			drawImmediateMode = false,
+		}
+		font.view = view
+		
+		local GLSceneObject = require 'gl.sceneobject'
+		sceneObj = GLSceneObject{
 			program = {
 				version = 'latest',
 				precision = 'best',
-				vertexCode=[[
+				vertexCode = [[
 in vec2 vertex;
 out vec2 tc;
 uniform mat4 mvProjMat;
@@ -107,13 +127,11 @@ void main() {
 		}:unbind()
 	end
 
-	function GLES2Renderer:ortho(a,b,c,d,e,f)
-		view.projMat:setOrtho(a,b,c,d,e,f)
+	function GLES2Renderer:ortho(...)
+		view.projMat:setOrtho(...)
 	end
 
-	function GLES2Renderer:preRender() end
-
-	function GLES2Renderer:drawBlock(x,y,w,h,th,r,g,b)
+	function GLES2Renderer:drawRect(x,y,w,h,th,r,g,b)
 		view.mvMat
 			:setTranslate(x,y,0)
 			:applyRotate(th,0,0,1)
@@ -232,6 +250,28 @@ local netFieldBlock = class(NetFieldObject)
 netFieldBlock.__netallocator = Block
 
 
+local messages = table()
+local Message = class()
+Message.duration = 3
+Message.endPos = vec2(worldSize/2, 2)
+function Message:init(args)
+	messages:insert(self)
+	--self.startPos = args.pos
+	self.startPos = vec2(self.endPos:unpack())
+	self.text = args.text
+	self.startTime = time
+end
+--[[ or locally spawned object, no net communication?
+Message.__netfields = {
+	startPos = netFieldVec2,
+	text = netFieldString,
+	startTime = netFieldNumber,
+}
+local netFieldText = class(NetFieldObject)
+netFieldText.__netallocator = Message
+--]]
+
+
 local Item = class()
 Item.speed = 50
 Item.__netfields = {
@@ -297,9 +337,12 @@ function Item:init(itemType)
 	self.vel = vec2()
 	self.type = itemType
 end
-function Item:touch(player, game)	-- TODO subclass
+function Item:touch(player, game)
 	local itemType = assert(self.types[self.type])
-	print('player '..player.index..' got '..itemType.desc)
+	Message{
+		text = 'player '..player.index..' got '..itemType.desc,
+		pos = vec2(player.pos),
+	}
 	itemType.exec(player, game)
 end
 local netFieldItem = class(NetFieldObject)
@@ -640,45 +683,41 @@ function App:update()
 	gl.glDisable(gl.GL_CULL_FACE)
 	gl.glClear(bit.bor(gl.GL_COLOR_BUFFER_BIT, gl.GL_DEPTH_BUFFER_BIT))
 
-	R:preRender()
-
-	-- TODO draw scores ...
-
-	R:drawBlock(worldSize*.5,worldSize*.5,worldSize,worldSize,0,0,0,0)
+	R:drawRect(worldSize*.5, worldSize*.5, worldSize, worldSize, 0, 0, 0, 0)
 	if ballTex then ballTex:bind() end
-	R:drawBlock(
+	R:drawRect(
 		game.ball.pos[1],
 		game.ball.pos[2],
 		2, 2,
 		0,
-		1,1,1
+		1, 1, 1
 	)
 
 	if playerTex then playerTex:bind() end
 	for playerIndex,player in ipairs{game.playerA, game.playerB} do
-		R:drawBlock(
+		R:drawRect(
 			Player.xForIndex[playerIndex],
 			player.y,
 			2, player.size,
 			0,
-			1,1,1
+			1, 1, 1
 		)
 	end
 
 	if itemTex then itemTex:bind() end
 	for _,item in ipairs(game.items) do
 		local c = Item.types[item.type].color
-		R:drawBlock(
+		R:drawRect(
 			item.pos[1], item.pos[2],
-			3,3,
-			180*time,
+			3, 3,
+			180 * time,
 			c[1], c[2], c[3]
 		)
 	end
 
 	if blockTex then blockTex:bind() end
 	for _,block in ipairs(game.blocks) do
-		R:drawBlock(
+		R:drawRect(
 			(block.pos[1] - .5) / game.blockGridSize * worldSize,
 			(block.pos[2] - .5) / game.blockGridSize * worldSize,
 			worldSize / game.blockGridSize,
@@ -687,6 +726,38 @@ function App:update()
 			1,1,1
 		)
 	end
+
+	-- TODO draw scores ...
+
+	local fontSize = 5
+	local view = font.view
+	view.mvMat:setIdent()
+	view.mvProjMat:mul4x4(view.projMat, view.mvMat)
+	for i=#messages,1,-1 do
+		local message = messages[i]
+		local timeFrac = (time - message.startTime) / message.duration
+		if timeFrac > 1 then
+			messages:remove(i)
+		else
+			-- TOOD some weird effects
+			local x = math.mix(message.startPos[1], message.endPos[1], timeFrac)
+			local y = math.mix(message.startPos[2], message.endPos[2], timeFrac)
+			local width = font:drawUnpacked(
+				x, y,				-- pos
+				fontSize, fontSize,	-- fontSize
+				message.text,		-- text
+				nil, nil,			-- size
+				nil, nil, nil, nil,	-- color
+				true				-- dontRender
+			)		
+			font:drawUnpacked(
+				x - .5 * width, y,	-- pos
+				fontSize, fontSize,	-- fontSize
+				message.text		-- text
+			)
+		end
+	end
+
 
 	-- get player input
 
