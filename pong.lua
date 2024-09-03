@@ -6,14 +6,16 @@ we want to allow 1-4 players, any of which can be AI or remote connections
 remote connections may or may not be players
 --]]
 
+local gl = require 'gl'
 local ffi = require 'ffi'
 local sdl = require 'sdl'
+local math = require 'ext.math'
 local class = require 'ext.class'
 local table = require 'ext.table'
 local vec2 = require 'vec.vec2'
 local matrix_ffi = require 'matrix.ffi'
 local netFieldNumber = require 'netrefl.netfield'.netFieldNumber
-local netFieldVec2 = require 'netrefl.netfield_vec'.netFieldVec2 
+local netFieldVec2 = require 'netrefl.netfield_vec'.netFieldVec2
 local createNetFieldList = require 'netrefl.netfield_list'.createNetFieldList
 local NetCom = require 'netrefl.netcom'
 local Server = require 'netrefl.server'
@@ -26,8 +28,7 @@ local worldSize = 100	-- biggest size of the game
 local Renderer = class()
 Renderer.requireClasses = {}
 
-function Renderer:init(gl)
-	self.gl = gl
+function Renderer:init()
 	gl.glPixelStorei(gl.GL_UNPACK_ALIGNMENT, 1)
 end
 
@@ -41,92 +42,31 @@ function Renderer:onResize(wx,wy)
 	end
 end
 
-local blockVtxs = ffi.new('float[12]',
- -.5, -.5, 0,
-  .5, -.5, 0,
- -.5,  .5, 0,
-  .5,  .5, 0
-)
-local blockTriStrip = ffi.new('unsigned short[4]',
-	0,1,2,3
-)
-
-do
-	local GLRenderer = class(Renderer)
-	Renderer.requireClasses.gl = GLRenderer
-
-	local GLTex2D
-	
-	local gl -- gl namespace
-	function GLRenderer:init(gl_)
-		GLRenderer.super.init(self, gl_)
-		gl = gl_
-		GLTex2D = require 'gl.tex2d'
-	end
-	function GLRenderer:createTex2D(filename)
-		return GLTex2D{
-			filename=filename,
-			minFilter=gl.GL_LINEAR,
-			magFilter=gl.GL_LINEAR,
-		}:unbind()
-	end
-
-	function GLRenderer:ortho(a,b,c,d,e,f)
-		gl.glMatrixMode(gl.GL_PROJECTION)
-		gl.glLoadIdentity()
-		gl.glOrtho(a,b,c,d,e,f)
-		gl.glMatrixMode(gl.GL_MODELVIEW)
-	end
-	
-	function GLRenderer:preRender()
-		if useTextures then gl.glEnable(gl.GL_TEXTURE_2D) end
-		gl.glMatrixMode(gl.GL_MODELVIEW)
-		gl.glLoadIdentity()
-		gl.glDisable(gl.GL_TEXTURE_2D)
-	end
-	
-	function GLRenderer:drawBlock(x,y,w,h,th,r,g,b)
-		gl.glColor3f(r,g,b)
-		gl.glPushMatrix()
-		gl.glTranslatef(x,y,0)
-		gl.glRotatef(th,0,0,1)
-		gl.glScalef(w,h,1)
-		gl.glBegin(gl.GL_TRIANGLE_STRIP)
-		for i=0,11,3 do
-			gl.glTexCoord2f(blockVtxs[i]+.5, blockVtxs[i+1]+.5)
-			gl.glVertex3f(blockVtxs[i], blockVtxs[i+1], blockVtxs[i+2])
-		end
-		gl.glEnd()
-		gl.glPopMatrix()
-	end
-end
-
 do
 	local GLES2Renderer = class(Renderer)
 	Renderer.requireClasses.OpenGLES2 = GLES2Renderer
-	
+
 	local GLProgram
+	local GLTex2D
 	local shader
 	local rmat, smat, rsmat, tmat, mvmat, projmat, mvprojmat
 	local color = ffi.new('float[4]')
-	
-	local gl -- gl namespace
-	function GLES2Renderer:init(gl_)
-		GLES2Renderer.super.init(self, gl_)
-		gl = gl_
+	local sceneObj
+	function GLES2Renderer:init()
+		GLES2Renderer.super.init(self)
 		GLProgram = require 'gl.program'
 		GLTex2D = require 'gl.tex2d'
 		shader = GLProgram{
 			version = 'latest',
 			precision = 'best',
 			vertexCode=[[
-in vec4 pos;
+in vec2 vertex;
 out vec2 tc;
 uniform mat4 mat;
 void main() {
-	tc = pos.xy + vec2(.5,.5);
-	gl_Position = mat * pos;
-} 
+	tc = vertex.xy + vec2(.5, .5);
+	gl_Position = mat * vec4(vertex, 0., 1.);
+}
 ]],
 			fragmentCode=[[
 in vec2 tc;
@@ -134,12 +74,16 @@ out vec4 fragColor;
 uniform vec4 color;
 uniform sampler2D tex;
 void main() {
-	fragColor = color * texture(tex, tc); 
-} 
+	fragColor = color * texture(tex, tc);
+}
 ]],
-		}
+			uniforms = {
+				tex = 0,
+			},
+		}:useNone()
+
 		local GLMatrix4x4 = function()
-			return matrix_ffi({4,4}, 'float'):zeros():setIdent()
+			return matrix_ffi({4,4}, 'float'):zeros()
 		end
 		rmat = GLMatrix4x4()
 		smat = GLMatrix4x4()
@@ -148,8 +92,27 @@ void main() {
 		mvmat = GLMatrix4x4()
 		projmat = GLMatrix4x4()
 		mvprojmat = GLMatrix4x4()
+
+		sceneObj = require 'gl.sceneobject'{
+			program = shader,
+			vertexes = {
+				data = {
+					 -.5, -.5,
+					  .5, -.5,
+					 -.5,  .5,
+					  .5,  .5,
+				},
+				dim = 2,
+				count = 4,
+			},
+			geometry = {
+				mode = gl.GL_TRIANGLE_STRIP,
+				offset = 0,
+				count = 4,
+			},
+		}
 	end
-	
+
 	function GLES2Renderer:createTex2D(filename)
 		return GLTex2D{
 			filename=filename,
@@ -161,9 +124,9 @@ void main() {
 	function GLES2Renderer:ortho(a,b,c,d,e,f)
 		projmat:setOrtho(a,b,c,d,e,f)
 	end
-	
+
 	function GLES2Renderer:preRender() end
-	
+
 	function GLES2Renderer:drawBlock(x,y,w,h,th,r,g,b)
 		rmat:setRotate(th,0,0,1)
 		smat:setScale(w,h,1)
@@ -175,21 +138,16 @@ void main() {
 		color[1] = g
 		color[2] = b
 		color[3] = 1
-		gl.glUseProgram(shader.id)
-		gl.glVertexAttribPointer(shader.attrs.pos.loc, 3, gl.GL_FLOAT, false, 12, blockVtxs)
-		gl.glEnableVertexAttribArray(shader.attrs.pos.loc)
-		gl.glUniform1i(shader.uniforms.tex.loc, 0);
-		gl.glUniform4fv(shader.uniforms.color.loc, 1, color)
-		gl.glUniformMatrix4fv(shader.uniforms.mat.loc, 1, false, mvprojmat.ptr)
- 		gl.glDrawElements(gl.GL_TRIANGLE_STRIP,4,gl.GL_UNSIGNED_SHORT,blockTriStrip)
-        gl.glDisableVertexAttribArray(shader.attrs.pos.loc)
-		gl.glUseProgram(0)
+
+		sceneObj.uniforms.color = color
+		sceneObj.uniforms.mat = mvprojmat.ptr
+		sceneObj:draw()
 	end
 end
 
 local testingRemote = false
 local useSound = true
-local useMouse = false
+local useMouse	-- nil means moving mouse can set it to true ... but touching keyboard sets it to false (can't use mouse after that)
 local useTextures = true
 local useJoystick = false
 
@@ -206,7 +164,7 @@ if useSound then
 	playerHitSounds = {AudioBuffer('player1.wav'), AudioBuffer('player2.wav')}
 	blockHitSound = AudioBuffer('block.wav')
 	getItemSound = AudioBuffer('item.wav')
- 
+
 	-- TODO query from hardware how many simultanoues sources can be played?
 	audioSources = table()
 	for i=1,8 do
@@ -375,7 +333,7 @@ Game.spawnBlockDuration = 1
 function Game:init()
 	self.ball = Ball()
 	self.playerA = Player(1)
-	self.playerB = Player(2)	
+	self.playerB = Player(2)
 	self:reset()
 end
 function Game:reset()
@@ -387,18 +345,18 @@ function Game:reset()
 	self.nextBlockTime = time + self.spawnBlockDuration
 end
 function Game:update(dt)
-	
+
 	local players = {self.playerA, self.playerB}
-	
+
 	for _,player in ipairs(players) do
 		player.y = player.y + player.vy * (player.speedScalar * player.speed * dt)
 		player.vy = 0
 		if player.y < 0 then player.y = 0 end
 		if player.y > worldSize then player.y = worldSize end
 	end
-	
+
 	if time < self.startTime then return end
-	
+
 	if time > self.nextBlockTime then
 		self.nextBlockTime = time + self.spawnBlockDuration
 		local newBlockPos = vec2(math.random(1,self.blockGridSize), math.random(1,self.blockGridSize))
@@ -414,9 +372,9 @@ function Game:update(dt)
 			self.nextBlockTime = time + self.spawnBlockDuration
 		end
 	end
-	
+
 	local ball = self.ball
-	
+
 	-- cheat AI
 	for index,player in ipairs(players) do
 		if not player.serverConn then
@@ -440,7 +398,7 @@ function Game:update(dt)
 			for playerIndex,player in ipairs(players) do
 				local playerX = Player.xForIndex[playerIndex]
 				if playerX >= minx
-				and playerX <= maxx 
+				and playerX <= maxx
 				and item.pos[2] >= player.y - player.size * .5
 				and item.pos[2] <= player.y + player.size * .5
 				then
@@ -451,15 +409,15 @@ function Game:update(dt)
 				end
 			end
 		end
-		
+
 		-- item may have been removed...
 		item.pos = itemNewPos
 	end
-	
-	-- update ball	
+
+	-- update ball
 	local step = ball.vel * dt * ball.speedScalar
 	local newpos = ball.pos + step
-	
+
 	-- hit far wall?
 	local reset = false
 	if newpos[1] <= 0 then
@@ -473,7 +431,7 @@ function Game:update(dt)
 		self:reset()
 		do return end
 	end
-	
+
 	-- bounce off walls
 	if newpos[2] < 0 and ball.vel[2] < 0 then
 		self.server:netcall{'blockHitSound'}
@@ -483,7 +441,7 @@ function Game:update(dt)
 		self.server:netcall{'blockHitSound'}
 		ball.vel[2] = -ball.vel[2]
 	end
-	
+
 	-- bounce off blocks
 	-- TODO traceline
 	do
@@ -512,17 +470,17 @@ function Game:update(dt)
 						n[2] = 1
 					end
 				end
-				
+
 				local nDotV = vec2.dot(n, ball.vel)
 				if nDotV < 0 then
 					-- hit block
 					ball.vel = ball.vel - n * 2 * nDotV
 					self.server:netcall{'blockHitSound'}
-					
+
 					-- and remove the block
 					self.blocks:removeObject(block)
 					blockCol[math.ceil(gridPos[2])] = nil
-					
+
 					if ball.lastHitPlayer
 					and math.random() < .2
 					then
@@ -537,11 +495,11 @@ function Game:update(dt)
 			end
 		end
 	end
-	
+
 	-- now test if it hits the paddle
 	for index,player in ipairs(players) do
 		local playerX = Player.xForIndex[index]
-	
+
 		local frac = (playerX - ball.pos[1]) / step[1]
 		if frac >= 0 and frac <= 1 then
 			-- ballX is playerX at this point
@@ -554,7 +512,7 @@ function Game:update(dt)
 				local nDotV = vec2.dot(player.normal, ball.vel)
 				if nDotV < 0 then
 					self.server:netcall{'playerHitSound', player.index}
-				
+
 					ball.vel[1] = -ball.vel[1]
 					ball.vel[2] = ((ballY - (player.y - player.size * .5)) / player.size * 2 - 1) * 2 * math.abs(ball.vel[1])
 					ball.lastHitPlayer = player
@@ -562,7 +520,7 @@ function Game:update(dt)
 			end
 		end
 	end
-	
+
 	ball.pos = newpos
 end
 
@@ -572,7 +530,7 @@ local game = Game()
 local netcom = NetCom()
 
 -- add an object to be reflected
--- addObject means syncing goes both ways ... ? 
+-- addObject means syncing goes both ways ... ?
 -- which means delays in coherency may incur ... ?
 netcom:addObject{
 	name='game',
@@ -659,141 +617,148 @@ if useJoystick then
 end
 
 local rendererClass = Renderer.requireClasses.OpenGLES2
-local gl = require 'gl'
+
+local GLApp = require 'glapp'
+local App = GLApp:subclass()
+
+App.sdlInitFlags = sdlInitFlags
+App.title = "Super Pong"
 
 local R -- renderer singleton
-local GLApp = require 'glapp'
-local App = GLApp:subclass{
-	sdlInitFlags = sdlInitFlags,
-	title = "Super Pong",
-	initGL = function(self)
-		R = rendererClass(gl)
-		gl.glClearColor(0,0,1,1)
-		if useTextures then
-			playerTex = R:createTex2D('player.png')
-			blockTex = R:createTex2D('block.png')
-			ballTex = R:createTex2D('ball.png')
+function App:initGL()
+	R = rendererClass(gl)
+	gl.glClearColor(0,0,1,1)
+	if useTextures then
+		playerTex = R:createTex2D('player.png')
+		blockTex = R:createTex2D('block.png')
+		ballTex = R:createTex2D('ball.png')
+	end
+	if useJoystick then
+		for i=0,sdl.SDL_NumJoysticks()-1 do
+			joysticks[i] = sdl.SDL_JoystickOpen(i)
 		end
- 		if useJoystick then
-	 		for i=0,sdl.SDL_NumJoysticks()-1 do
-				joysticks[i] = sdl.SDL_JoystickOpen(i)
-			end
-		end
-	end,
-	exit = function()
-		audio:shutdown()
-	end,
-	update = function()
-		lastTime = time
-		time = sdl.SDL_GetTicks() / 1000
-		local deltaTime = time - lastTime
-		gl.glClear(bit.bor(gl.GL_COLOR_BUFFER_BIT, gl.GL_DEPTH_BUFFER_BIT))
-		
-		R:preRender()
-		
-		-- TODO draw scores ...
-	
-		R:drawBlock(worldSize*.5,worldSize*.5,worldSize,worldSize,0,0,0,0)
-		if ballTex then ballTex:bind() end
+	end
+end
+
+function App:exit()
+	audio:shutdown()
+	App.super.exit(self)
+end
+
+function App:update()
+	lastTime = time
+	time = sdl.SDL_GetTicks() / 1000
+	local deltaTime = time - lastTime
+
+	gl.glDisable(gl.GL_DEPTH_TEST)
+	gl.glDisable(gl.GL_CULL_FACE)
+	gl.glClear(bit.bor(gl.GL_COLOR_BUFFER_BIT, gl.GL_DEPTH_BUFFER_BIT))
+
+	R:preRender()
+
+	-- TODO draw scores ...
+
+	R:drawBlock(worldSize*.5,worldSize*.5,worldSize,worldSize,0,0,0,0)
+	if ballTex then ballTex:bind() end
+	R:drawBlock(
+		game.ball.pos[1],
+		game.ball.pos[2],
+		2, 2,
+		0,
+		1,1,1
+	)
+
+	if playerTex then playerTex:bind() end
+	for playerIndex,player in ipairs{game.playerA, game.playerB} do
 		R:drawBlock(
-			game.ball.pos[1],
-			game.ball.pos[2],
-			2, 2,
+			Player.xForIndex[playerIndex],
+			player.y,
+			2, player.size,
 			0,
 			1,1,1
 		)
-		
-		if playerTex then playerTex:bind() end
-		for playerIndex,player in ipairs{game.playerA, game.playerB} do
-			R:drawBlock(
- 				Player.xForIndex[playerIndex],
-				player.y,
- 				2, player.size,
-				0,
-				1,1,1
-			)
+	end
+
+	if itemTex then itemTex:bind() end
+	for _,item in ipairs(game.items) do
+		local c = Item.types[item.type].color
+		R:drawBlock(
+			item.pos[1], item.pos[2],
+			3,3,
+			180*time,
+			c[1], c[2], c[3]
+		)
+	end
+
+	if blockTex then blockTex:bind() end
+	for _,block in ipairs(game.blocks) do
+		R:drawBlock(
+			(block.pos[1] - .5) / game.blockGridSize * worldSize,
+			(block.pos[2] - .5) / game.blockGridSize * worldSize,
+			worldSize / game.blockGridSize,
+			worldSize / game.blockGridSize,
+			0,
+			1,1,1
+		)
+	end
+
+	-- get player input
+
+	if clientConn.player then
+		if useMouse then
+			sdl.SDL_GetMouseState(x,y)
+			local wx, wy = self:size()
+			local px = x[0] / wx * worldSize
+			local py = y[0] / wy * worldSize
+			--clientConn.player.y = worldSize * y[0] / wy
+			if py < clientConn.player.y then
+				clientConn.player:move(-1)
+			elseif py > clientConn.player.y then
+				clientConn.player:move(1)
+			end
 		end
 
-		if itemTex then itemTex:bind() end
-		for _,item in ipairs(game.items) do
-			local c = Item.types[item.type].color 
-			R:drawBlock(
-				item.pos[1], item.pos[2],
-				3,3,
-				180*time,
-				c[1], c[2], c[3]
-			)
+		local keys = sdl.SDL_GetKeyboardState(numKeys)
+		if keys[sdl.SDL_SCANCODE_UP] ~= 0 then
+			clientConn.player:move(-1)
+			useMouse = false
 		end
-		
-		if blockTex then blockTex:bind() end
-		for _,block in ipairs(game.blocks) do
-			R:drawBlock(
-	 			(block.pos[1] - .5) / game.blockGridSize * worldSize,
-				(block.pos[2] - .5) / game.blockGridSize * worldSize,
- 	 			worldSize / game.blockGridSize,
-				worldSize / game.blockGridSize,
-				0,
-				1,1,1
- 			)
+		if keys[sdl.SDL_SCANCODE_DOWN] ~= 0 then
+			clientConn.player:move(1)
+			useMouse = false
 		end
-		
-		-- get player input
-		
-		if clientConn.player then
-			if useMouse then
-				sdl.SDL_GetMouseState(x,y)
-				local wx, wy = self:size()
-				local px = x[0] / wx * worldSize
-				local py = y[0] / wy * worldSize
-				--clientConn.player.y = worldSize * y[0] / wy
-				if py < clientConn.player.y then
-					clientConn.player:move(-1)
-				elseif py > clientConn.player.y then
-					clientConn.player:move(1)
-				end
-			end
-			
-			local keys = sdl.SDL_GetKeyboardState(numKeys)
-			if keys[sdl.SDL_SCANCODE_UP] ~= 0 then
+
+		if joysticks[0] then
+			local jy = sdl.SDL_JoystickGetAxis(joysticks[0], 1)
+			if jy < -10922 then
 				clientConn.player:move(-1)
 				useMouse = false
-			end
-			if keys[sdl.SDL_SCANCODE_DOWN] ~= 0 then
+			elseif jy > 10922 then
 				clientConn.player:move(1)
 				useMouse = false
 			end
-			
-			if joysticks[0] then
-				local jy = sdl.SDL_JoystickGetAxis(joysticks[0], 1)
-				if jy < -10922 then
-					clientConn.player:move(-1)
-					useMouse = false
-				elseif jy > 10922 then
-					clientConn.player:move(1)
-					useMouse = false
-				end
-			end
 		end
-	
-		game:update(deltaTime)
-		netcom:update()
-	end,
-	event = function(self, event)
-		--[[
-		if event[0].type == sdl.SDL_VIDEORESIZE then
-			R:onResize(event[0].resize.w, event[0].resize.h)
-		else
-		--]]
-		if event[0].type == sdl.SDL_KEYDOWN then
-			if event[0].key.keysym.sym == sdl.SDLK_ESCAPE then
-				self:requestExit()
-			end
-		elseif event[0].type == sdl.SDL_MOUSEMOTION then
-			if useMouse ~= false then	-- only set to true if it has not yet been defined (cleared by keys/joystick)
-				useMouse = true
-			end
+	end
+
+	game:update(deltaTime)
+	netcom:update()
+end
+
+function App:resize()
+	App.super.resize(self)
+	R:onResize(self.width, self.height)
+end
+
+function App:event(event)
+	if event[0].type == sdl.SDL_KEYDOWN then
+		if event[0].key.keysym.sym == sdl.SDLK_ESCAPE then
+			self:requestExit()
 		end
-	end,
-}
+	elseif event[0].type == sdl.SDL_MOUSEMOTION then
+		if useMouse ~= false then	-- only set to true if it has not yet been defined (cleared by keys/joystick)
+			useMouse = true
+		end
+	end
+end
 
 return App():run()
