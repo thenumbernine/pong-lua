@@ -46,29 +46,29 @@ do
 	local GLES2Renderer = class(Renderer)
 	Renderer.requireClasses.OpenGLES2 = GLES2Renderer
 
-	local GLProgram
 	local GLTex2D
-	local shader
-	local rmat, smat, rsmat, tmat, mvmat, projmat, mvprojmat
 	local color = ffi.new('float[4]')
 	local sceneObj
+	local view
 	function GLES2Renderer:init()
 		GLES2Renderer.super.init(self)
-		GLProgram = require 'gl.program'
 		GLTex2D = require 'gl.tex2d'
-		shader = GLProgram{
-			version = 'latest',
-			precision = 'best',
-			vertexCode=[[
+
+		view = require 'glapp.view'()
+		sceneObj = require 'gl.sceneobject'{
+			program = {
+				version = 'latest',
+				precision = 'best',
+				vertexCode=[[
 in vec2 vertex;
 out vec2 tc;
-uniform mat4 mat;
+uniform mat4 mvProjMat;
 void main() {
 	tc = vertex.xy + vec2(.5, .5);
-	gl_Position = mat * vec4(vertex, 0., 1.);
+	gl_Position = mvProjMat * vec4(vertex, 0., 1.);
 }
 ]],
-			fragmentCode=[[
+				fragmentCode = [[
 in vec2 tc;
 out vec4 fragColor;
 uniform vec4 color;
@@ -77,24 +77,10 @@ void main() {
 	fragColor = color * texture(tex, tc);
 }
 ]],
-			uniforms = {
-				tex = 0,
+				uniforms = {
+					tex = 0,
+				},
 			},
-		}:useNone()
-
-		local GLMatrix4x4 = function()
-			return matrix_ffi({4,4}, 'float'):zeros()
-		end
-		rmat = GLMatrix4x4()
-		smat = GLMatrix4x4()
-		rsmat = GLMatrix4x4()
-		tmat = GLMatrix4x4()
-		mvmat = GLMatrix4x4()
-		projmat = GLMatrix4x4()
-		mvprojmat = GLMatrix4x4()
-
-		sceneObj = require 'gl.sceneobject'{
-			program = shader,
 			vertexes = {
 				data = {
 					 -.5, -.5,
@@ -115,32 +101,32 @@ void main() {
 
 	function GLES2Renderer:createTex2D(filename)
 		return GLTex2D{
-			filename=filename,
-			minFilter=gl.GL_LINEAR,
-			magFilter=gl.GL_LINEAR,
+			filename = filename,
+			minFilter = gl.GL_LINEAR,
+			magFilter = gl.GL_LINEAR,
 		}:unbind()
 	end
 
 	function GLES2Renderer:ortho(a,b,c,d,e,f)
-		projmat:setOrtho(a,b,c,d,e,f)
+		view.projMat:setOrtho(a,b,c,d,e,f)
 	end
 
 	function GLES2Renderer:preRender() end
 
 	function GLES2Renderer:drawBlock(x,y,w,h,th,r,g,b)
-		rmat:setRotate(th,0,0,1)
-		smat:setScale(w,h,1)
-		rsmat:mul4x4(rmat,smat)
-		tmat:setTranslate(x,y,0)
-		mvmat:mul4x4(tmat,rsmat)
-		mvprojmat:mul4x4(projmat, mvmat)
+		view.mvMat
+			:setTranslate(x,y,0)
+			:applyRotate(th,0,0,1)
+			:applyScale(w,h,1)
+		view.mvProjMat:mul4x4(view.projMat, view.mvMat)
+
 		color[0] = r
 		color[1] = g
 		color[2] = b
 		color[3] = 1
 
 		sceneObj.uniforms.color = color
-		sceneObj.uniforms.mat = mvprojmat.ptr
+		sceneObj.uniforms.mvProjMat = view.mvProjMat.ptr
 		sceneObj:draw()
 	end
 end
