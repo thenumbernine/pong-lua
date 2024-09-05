@@ -12,6 +12,7 @@ local sdl = require 'sdl'
 local math = require 'ext.math'
 local class = require 'ext.class'
 local table = require 'ext.table'
+local getTime = require 'ext.timer'.getTime
 local vec2 = require 'vec.vec2'
 local matrix_ffi = require 'matrix.ffi'
 local netFieldNumber = require 'netrefl.netfield'.netFieldNumber
@@ -214,7 +215,7 @@ function Player:init(index)
 	end
 end
 function Player:move(dy)
-	self.vy = self.vy + dy
+	self.vy = dy
 end
 local netFieldPlayer = class(NetFieldObject)
 netFieldPlayer.__netallocator = Player
@@ -379,7 +380,6 @@ function Game:update(dt)
 
 	for _,player in ipairs(players) do
 		player.y = player.y + player.vy * (player.speedScalar * player.speed * dt)
-		player.vy = 0
 		if player.y < 0 then player.y = 0 end
 		if player.y > worldSize then player.y = worldSize end
 	end
@@ -676,7 +676,7 @@ end
 
 function App:update()
 	lastTime = time
-	time = sdl.SDL_GetTicks() / 1000
+	time = getTime()
 	local deltaTime = time - lastTime
 
 	gl.glDisable(gl.GL_DEPTH_TEST)
@@ -758,41 +758,15 @@ function App:update()
 		end
 	end
 
-
-	-- get player input
-
-	if clientConn.player then
+	if clientConn.player then		
 		if useMouse then
-			sdl.SDL_GetMouseState(x,y)
-			local wx, wy = self:size()
-			local px = x[0] / wx * worldSize
-			local py = y[0] / wy * worldSize
 			--clientConn.player.y = worldSize * y[0] / wy
-			if py < clientConn.player.y then
+			if clientConn.player.mouseY < clientConn.player.y then
 				clientConn.player:move(-1)
-			elseif py > clientConn.player.y then
+			elseif clientConn.player.mouseY > clientConn.player.y then
 				clientConn.player:move(1)
-			end
-		end
-
-		local keys = sdl.SDL_GetKeyboardState(numKeys)
-		if keys[sdl.SDL_SCANCODE_UP] ~= 0 then
-			clientConn.player:move(-1)
-			useMouse = false
-		end
-		if keys[sdl.SDL_SCANCODE_DOWN] ~= 0 then
-			clientConn.player:move(1)
-			useMouse = false
-		end
-
-		if joysticks[0] then
-			local jy = sdl.SDL_JoystickGetAxis(joysticks[0], 1)
-			if jy < -10922 then
-				clientConn.player:move(-1)
-				useMouse = false
-			elseif jy > 10922 then
-				clientConn.player:move(1)
-				useMouse = false
+			else
+				clientConn.player:move(0)
 			end
 		end
 	end
@@ -807,15 +781,55 @@ function App:resize()
 end
 
 function App:event(event)
-	if event[0].type == sdl.SDL_KEYDOWN then
-		if event[0].key.keysym.sym == sdl.SDLK_ESCAPE then
-			self:requestExit()
-		end
-	elseif event[0].type == sdl.SDL_MOUSEMOTION then
+	if event[0].type == sdl.SDL_MOUSEMOTION then
 		if useMouse ~= false then	-- only set to true if it has not yet been defined (cleared by keys/joystick)
 			useMouse = true
 		end
 	end
+
+	-- get player input
+
+	if clientConn.player then
+		if useMouse then
+			if event[0].type == sdl.SDL_MOUSEMOTION then
+				local x = event[0].motion.x
+				local y = event[0].motion.y
+				local wx, wy = self:size()
+				local px = x / wx * worldSize
+				local py = y / wy * worldSize
+				clientConn.player.mouseX = px
+				clientConn.player.mouseY = py
+			end
+		end
+
+		if event[0].type == sdl.SDL_KEYUP
+		or event[0].type == sdl.SDL_KEYDOWN
+		then
+			local keydown = event[0].type == sdl.SDL_KEYDOWN
+			if event[0].key.keysym.sym == sdl.SDLK_UP then
+				clientConn.player:move(keydown and -1 or 0)
+				useMouse = false
+			elseif event[0].key.keysym.sym == sdl.SDLK_DOWN then
+				clientConn.player:move(keydown and 1 or 0)
+				useMouse = false
+			end
+		end
+
+		if joysticks[0] then
+			local jy = sdl.SDL_JoystickGetAxis(joysticks[0], 1)
+			if jy < -10922 then
+				clientConn.player:move(-1)
+				useMouse = false
+			elseif jy > 10922 then
+				clientConn.player:move(1)
+				useMouse = false
+			else
+				clientConn.player:move(0)
+				useMouse = false
+			end
+		end
+	end
+
 end
 
 return App():run()
