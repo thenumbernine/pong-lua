@@ -4,6 +4,8 @@
 
 Pong using my LuaJIT OpenGL framework.
 
+# [Play Online!](https://thenumbernine.github.io/glapp/?dir=pong&file=pong.lua)
+
 ### TODO
 
 - better graphics couldn't hurt
