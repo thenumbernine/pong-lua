@@ -58,10 +58,10 @@ do
 
 		local View = require 'glapp.view'
 		view = View()
-		
+
 		local Image = require 'image'
 		local fontImage = Image'font.png'
-		
+
 		local Font = require 'gui.font'
 		font = Font{
 			image = fontImage,
@@ -74,7 +74,7 @@ do
 			drawImmediateMode = false,
 		}
 		font.view = view
-		
+
 		local GLSceneObject = require 'gl.sceneobject'
 		sceneObj = GLSceneObject{
 			program = {
@@ -749,7 +749,7 @@ function App:update()
 				nil, nil,			-- size
 				nil, nil, nil, nil,	-- color
 				true				-- dontRender
-			)		
+			)
 			font:drawUnpacked(
 				x - .5 * width, y,	-- pos
 				fontSize, fontSize,	-- fontSize
@@ -758,7 +758,7 @@ function App:update()
 		end
 	end
 
-	if clientConn.player then		
+	if clientConn.player then
 		if useMouse then
 			--clientConn.player.y = worldSize * y[0] / wy
 			if clientConn.player.mouseY < clientConn.player.y then
@@ -781,7 +781,7 @@ function App:resize()
 end
 
 function App:event(event)
-	if event[0].type == sdl.SDL_MOUSEMOTION then
+	if event[0].type == sdl.SDL_MOUSEMOTION or event[0].type == sdl.SDL_FINGERMOTION then
 		if useMouse ~= false then	-- only set to true if it has not yet been defined (cleared by keys/joystick)
 			useMouse = true
 		end
@@ -794,6 +794,14 @@ function App:event(event)
 			if event[0].type == sdl.SDL_MOUSEMOTION then
 				local x = event[0].motion.x
 				local y = event[0].motion.y
+				local wx, wy = self:size()
+				local px = x / wx * worldSize
+				local py = y / wy * worldSize
+				clientConn.player.mouseX = px
+				clientConn.player.mouseY = py
+			elseif event[0].type == sdl.SDL_FINGERMOTION then
+				local x = event[0].tfinger.x
+				local y = event[0].tfinger.y
 				local wx, wy = self:size()
 				local px = x / wx * worldSize
 				local py = y / wy * worldSize
