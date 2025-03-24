@@ -800,8 +800,8 @@ function App:event(event)
 				clientConn.player.mouseX = px
 				clientConn.player.mouseY = py
 			elseif event[0].type == sdl.SDL_FINGERMOTION then
-				local x = event[0].tfinger.x
-				local y = event[0].tfinger.y
+				local x = event[0].tfinger.x * self.width
+				local y = event[0].tfinger.y * self.height
 				local wx, wy = self:size()
 				local px = x / wx * worldSize
 				local py = y / wy * worldSize
