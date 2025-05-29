@@ -663,7 +663,9 @@ function App:initGL()
 		ballTex = R:createTex2D('ball.png')
 	end
 	if useJoystick then
-		for i=0,sdl.SDL_NumJoysticks()-1 do
+		local count = ffi.new'int[1]'
+		self.sdlAssert(sdl.SDL_GetJoysticks(count))
+		for i=0,count[0]-1 do
 			joysticks[i] = sdl.SDL_JoystickOpen(i)
 		end
 	end
@@ -781,7 +783,9 @@ function App:resize()
 end
 
 function App:event(event)
-	if event[0].type == sdl.SDL_MOUSEMOTION or event[0].type == sdl.SDL_FINGERMOTION then
+	if event[0].type == sdl.SDL_EVENT_MOUSE_MOTION
+	or event[0].type == sdl.SDL_EVENT_FINGER_MOTION
+	then
 		if useMouse ~= false then	-- only set to true if it has not yet been defined (cleared by keys/joystick)
 			useMouse = true
 		end
@@ -791,7 +795,7 @@ function App:event(event)
 
 	if clientConn.player then
 		if useMouse then
-			if event[0].type == sdl.SDL_MOUSEMOTION then
+			if event[0].type == sdl.SDL_EVENT_MOUSE_MOTION then
 				local x = event[0].motion.x
 				local y = event[0].motion.y
 				local wx, wy = self:size()
@@ -799,7 +803,7 @@ function App:event(event)
 				local py = y / wy * worldSize
 				clientConn.player.mouseX = px
 				clientConn.player.mouseY = py
-			elseif event[0].type == sdl.SDL_FINGERMOTION then
+			elseif event[0].type == sdl.SDL_EVENT_FINGER_MOTION then
 				local x = event[0].tfinger.x * self.width
 				local y = event[0].tfinger.y * self.height
 				local wx, wy = self:size()
@@ -810,14 +814,14 @@ function App:event(event)
 			end
 		end
 
-		if event[0].type == sdl.SDL_KEYUP
-		or event[0].type == sdl.SDL_KEYDOWN
+		if event[0].type == sdl.SDL_EVENT_KEY_UP
+		or event[0].type == sdl.SDL_EVENT_KEY_DOWN
 		then
-			local keydown = event[0].type == sdl.SDL_KEYDOWN
-			if event[0].key.keysym.sym == sdl.SDLK_UP then
+			local keydown = event[0].type == sdl.SDL_EVENT_KEY_DOWN
+			if event[0].key.key == sdl.SDLK_UP then
 				clientConn.player:move(keydown and -1 or 0)
 				useMouse = false
-			elseif event[0].key.keysym.sym == sdl.SDLK_DOWN then
+			elseif event[0].key.key == sdl.SDLK_DOWN then
 				clientConn.player:move(keydown and 1 or 0)
 				useMouse = false
 			end
