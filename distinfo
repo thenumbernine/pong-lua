@@ -1,15 +1,20 @@
+--------------------------------------------
+-- generated with dist/build-distinfo.rua --
+--------------------------------------------
+
 name = "pong"
 files = {
-	["README.md"] = "pong/README.md",
-	["ball.png"] = "pong/ball.png",
-	["block.png"] = "pong/block.png",
-	["block.wav"] = "pong/block.wav",
-	["font.png"] = "pong/font.png",
-	["item.wav"] = "pong/item.wav",
-	["player.png"] = "pong/player.png",
-	["player1.wav"] = "pong/player1.wav",
-	["player2.wav"] = "pong/player2.wav",
-	["pong.lua"] = "pong/pong.lua",
+	"README.md",
+	"ball.png",
+	"block.png",
+	"block.wav",
+	"distinfo",
+	"font.png",
+	"item.wav",
+	"player.png",
+	"player1.wav",
+	"player2.wav",
+	"pong.lua",
 }
 deps = {
 	"audio",
