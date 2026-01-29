@@ -9,7 +9,6 @@ files = {
 	"block.png",
 	"block.wav",
 	"distinfo",
-	"font.png",
 	"item.wav",
 	"player.png",
 	"player1.wav",

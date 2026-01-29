@@ -59,21 +59,8 @@ do
 		local View = require 'glapp.view'
 		view = View()
 
-		local Image = require 'image'
-		local fontImage = Image'font.png'
-
 		local Font = require 'gui.font'
-		font = Font{
-			image = fontImage,
-			tex = GLTex2D{
-				image = fontImage,
-				minFilter = gl.GL_LINEAR_MIPMAP_LINEAR,
-				magFilter = gl.GL_LINEAR,
-				generateMipmap = true,
-			}:unbind(),
-			drawImmediateMode = false,
-		}
-		font.view = view
+		font = Font{view=view}
 
 		local GLSceneObject = require 'gl.sceneobject'
 		sceneObj = GLSceneObject{
