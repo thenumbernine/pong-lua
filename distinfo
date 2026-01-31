@@ -22,7 +22,6 @@ deps = {
 	"glapp",
 	"gui",
 	"image",
-	"matrix",
 	"netrefl",
 	"sdl",
 	"vec",

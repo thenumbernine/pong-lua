@@ -14,7 +14,6 @@ local class = require 'ext.class'
 local table = require 'ext.table'
 local getTime = require 'ext.timer'.getTime
 local vec2 = require 'vec.vec2'
-local matrix_ffi = require 'matrix.ffi'
 local netFieldNumber = require 'netrefl.netfield'.netFieldNumber
 local netFieldVec2 = require 'netrefl.netfield_vec'.netFieldVec2
 local createNetFieldList = require 'netrefl.netfield_list'.createNetFieldList
