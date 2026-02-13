@@ -16,10 +16,10 @@ files = {
 	"pong.lua",
 }
 deps = {
+	"app3d",
 	"audio",
 	"ext",
 	"gl",
-	"glapp",
 	"gui",
 	"image",
 	"netrefl",

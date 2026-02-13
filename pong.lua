@@ -55,7 +55,7 @@ do
 		GLES2Renderer.super.init(self)
 		GLTex2D = require 'gl.tex2d'
 
-		local View = require 'glapp.view'
+		local View = require 'app3d.view'
 		view = View()
 
 		local Font = require 'gui.font'
@@ -633,7 +633,7 @@ end
 
 local rendererClass = Renderer.requireClasses.OpenGLES2
 
-local GLApp = require 'glapp'
+local GLApp = require 'gl.app'
 local App = GLApp:subclass()
 
 App.sdlInitFlags = sdlInitFlags
